@@ -10,7 +10,8 @@ struct PCB {
     int priority;
     USLOSS_Context state;
     struct PCB *parent;
-    struct PCB *child;
+    struct PCB *first_child;
+    struct PBC *next_sibling;
     struct PCB *run_queue_next;
 };
 
@@ -50,7 +51,8 @@ void phase1_init(void) {
     initProcess.pid = 1;                     
     initProcess.priority = 6; 
     initProcess.parent = NULL;
-    initProcess.child = NULL;
+    initProcess.first_child = NULL;
+    initProcess.next_sibling = NULL;
     initProcess.run_queue_next = NULL;
 
     russ_ContextInit(initProcess.pid, &initProcess.state, stack, USLOSS_MIN_STACK, init_main, initProcess.name);
