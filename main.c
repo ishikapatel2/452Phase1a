@@ -1,26 +1,51 @@
 #include "phase1helper.h"
-
+#include "phase1.h"
 #include <stdio.h>
+#include <string.h>
 
-// ignore, block, unblock, and dispatcher
 
-struct process {
+struct PCB {
+    char name[MAXNAME];
     int pid;
     int priority;
     USLOSS_Context *state;
-
+    struct PCB *parent;
+    struct PCB *child;
+    struct PCB *run_queue_next;
 };
 
+
+// process table
+struct PCB *pTable[MAXPROC];
+
+// current process running
+struct PCB *curProcess;
 
 /*
     Called exactly once (when the simulator starts up). Initialize data structures
     here including setting up the process table entry for the starting process, init.
 
-    Create the process table entry for init but don't run it yet.
+    Create the process table entry for init in slot 1 but don't run it yet.
 */
 void phase1_init(void) {
-    
 
+    // intitilizes table
+    memset(pTable, 0, sizeof(pTable));
+
+    curProcess = NULL;
+
+    char *stack = (char *) malloc(USLOSS_MIN_STACK);
+
+    // init is a kernel mode process 
+    struct PCB initProcess;
+    strcpy(initProcess.name, "init"); 
+    initProcess.pid = 1;                     
+    initProcess.priority = 6; 
+    init_main(char*);
+
+
+
+    
 
 }
 
@@ -62,17 +87,20 @@ int  join(int *status) {
     Never needs to wake up a blocked parent process.
 
 
-
-
-
 */
-void quit_phase_1a(int status, int switchToPid) __attribute__((__noreturn__)) {
-
+void quit_phase_1a(int status, int switchToPid) {
+   
 }
 
 int  getpid(void) {
+    return 0;
+}
+
+
+void dumpProcesses() {
 
 }
+
 
 /*
     Testcases will choose exactly when to switch from one process to another.
