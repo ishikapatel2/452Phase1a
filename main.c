@@ -4,7 +4,6 @@
 #include <string.h>
 #include <stdlib.h>
 
-
 struct PCB {
     char name[MAXNAME];
     int pid;
@@ -13,6 +12,13 @@ struct PCB {
     struct PCB *parent;
     struct PCB *child;
     struct PCB *run_queue_next;
+};
+
+struct ListNode {
+    struct ListNode *next;
+    void *data;  // pointing to any data type
+
+
 };
 
 
@@ -46,14 +52,17 @@ void phase1_init(void) {
     initProcess.parent = NULL;
     initProcess.child = NULL;
     initProcess.run_queue_next = NULL;
-
-
-    // check for out of memory error
-    initProcess.state = (USLOSS_Context *) malloc(sizeof(USLOSS_Context));
+    initProcess.state = NULL;
 
     russ_ContextInit(initProcess.pid, initProcess.state, stack, USLOSS_MIN_STACK, init_main, initProcess.name);
 
     pTable[0] = initProcess;
+
+
+
+
+
+
 }
 
 /*
