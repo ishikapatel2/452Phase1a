@@ -2,6 +2,7 @@
 #include "phase1.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 
 struct PCB {
@@ -16,7 +17,7 @@ struct PCB {
 
 
 // process table
-struct PCB *pTable[MAXPROC];
+struct PCB pTable[MAXPROC];
 
 // current process running
 struct PCB *curProcess;
@@ -34,6 +35,7 @@ void phase1_init(void) {
 
     curProcess = NULL;
 
+    // check for out of memory error
     char *stack = (char *) malloc(USLOSS_MIN_STACK);
 
     // init is a kernel mode process 
@@ -41,12 +43,17 @@ void phase1_init(void) {
     strcpy(initProcess.name, "init"); 
     initProcess.pid = 1;                     
     initProcess.priority = 6; 
-    init_main(char*);
+    initProcess.parent = NULL;
+    initProcess.child = NULL;
+    initProcess.run_queue_next = NULL;
 
 
+    // check for out of memory error
+    initProcess.state = (USLOSS_Context *) malloc(sizeof(USLOSS_Context));
 
-    
+    russ_ContextInit(initProcess.pid, initProcess.state, stack, USLOSS_MIN_STACK, init_main, initProcess.name);
 
+    pTable[0] = initProcess;
 }
 
 /*
@@ -80,6 +87,18 @@ int  join(int *status) {
     return 0;
 }
 
+int  getpid(void) {
+    if (curProcess == NULL)
+        return -1;
+
+    return curProcess->pid;
+}
+
+
+void dumpProcesses() {
+
+}
+
 /*
     Since you don’t have a dispatcher, the calling process has to tell 
     you which process will run next.
@@ -89,16 +108,7 @@ int  join(int *status) {
 
 */
 void quit_phase_1a(int status, int switchToPid) {
-   
-}
-
-int  getpid(void) {
-    return 0;
-}
-
-
-void dumpProcesses() {
-
+    exit(status);
 }
 
 
