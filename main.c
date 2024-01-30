@@ -8,7 +8,7 @@ struct PCB {
     char name[MAXNAME];
     int pid;
     int priority;
-    USLOSS_Context *state;
+    USLOSS_Context state;
     struct PCB *parent;
     struct PCB *child;
     struct PCB *run_queue_next;
@@ -17,7 +17,7 @@ struct PCB {
 struct ListNode {
     struct ListNode *next;
     void *data;  // pointing to any data type
-
+    
 
 };
 
@@ -52,9 +52,8 @@ void phase1_init(void) {
     initProcess.parent = NULL;
     initProcess.child = NULL;
     initProcess.run_queue_next = NULL;
-    initProcess.state = NULL;
 
-    russ_ContextInit(initProcess.pid, initProcess.state, stack, USLOSS_MIN_STACK, init_main, initProcess.name);
+    russ_ContextInit(initProcess.pid, &initProcess.state, stack, USLOSS_MIN_STACK, init_main, initProcess.name);
 
     pTable[0] = initProcess;
 
