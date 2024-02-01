@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdlib.h>
 
+
 struct PCB {
     char name[MAXNAME];
     int pid;
@@ -15,13 +16,11 @@ struct PCB {
     struct PCB *run_queue_next;
 };
 
-struct ListNode {
-    struct ListNode *next;
-    void *data;  // pointing to any data type
-    
+// process table
+struct PCB pTable[MAXPROC];
 
-};
-
+// current process running
+struct PCB *curProcess;
 
 // process table
 struct PCB pTable[MAXPROC];
@@ -63,11 +62,27 @@ void phase1_init(void) {
 
 
 
+    // check for out of memory error
+    char *stack = (char *) malloc(USLOSS_MIN_STACK);
 
+    // init is a kernel mode process
+    struct PCB initProcess;
+    strcpy(initProcess.name, "init");
+    initProcess.pid = 1;
+    initProcess.priority = 6;
+    initProcess.parent = NULL;
+    initProcess.child = NULL;
+    initProcess.run_queue_next = NULL;
+
+    // check for out of memory error
+    initProcess.state = (USLOSS_Context *) malloc(sizeof(USLOSS_Context));
+
+    russ_ContextInit(initProcess.pid, initProcess.state, stack, USLOSS_MIN_STACK, init_main, initProcess.name);
+
+    pTable[0] = initProcess;
 }
 
 /*
-
     Creates a new process, which is the child of the currently running process.
 
     Does not call dispatcher after it creates a new process. Instead, testcase
@@ -76,7 +91,28 @@ void phase1_init(void) {
     Keep running parent process until testcases tells you otherwise.
 */
 int  spork(char *name, int(*func)(char *), char *arg, int stacksize, int priority) {
-    return 0;
+    struct PCB *newProcess = (struct PCB*)malloc(sizeof(struct PCB)); // are we not allowed to malloc here?
+
+    // set new process properties
+    strcpy(newProcess->name, name);
+    newProcess->priority = priority;
+    newProcess->pid = func; //idk about this
+    newProcess->child = NULL;
+    newProcess->run_queue_next = NULL;
+
+    // add child to parent's list of children
+    if (curProcess != NULL) {
+        if (curProcess->child == NULL) {
+            curProcess->child = childProcess;
+        } else {
+            struct PCB *temp = curProcess->child;
+            while (temp->run_queue_next != NULL) {
+                temp = temp->run_queue_next;
+            }
+            temp->run_queue_next = childProcess;
+        }
+    }
+    // return 0;
 }
 
 /*
@@ -115,10 +151,21 @@ void dumpProcesses() {
 
     Never needs to wake up a blocked parent process.
 
-
 */
 void quit_phase_1a(int status, int switchToPid) {
     exit(status);
+}
+
+int  getpid(void) {
+    if (curProcess == NULL) {
+        return -1;
+    }
+    
+    return curProcess->pid;
+}
+
+void dumpProcesses(){
+
 }
 
 
