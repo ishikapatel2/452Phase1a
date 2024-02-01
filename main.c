@@ -1,25 +1,67 @@
 #include "phase1helper.h"
-
+#include "phase1.h"
 #include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
 
-// ignore, block, unblock, and dispatcher
-
-struct process {
+struct PCB {
+    char name[MAXNAME];
     int pid;
     int priority;
-    USLOSS_Context *state;
+    USLOSS_Context state;
+    struct PCB *parent;
+    struct PCB *first_child;
+    struct PBC *next_sibling;
+    struct PCB *run_queue_next;
+};
+
+struct ListNode {
+    struct ListNode *next;
+    void *data;  // pointing to any data type
+    
 
 };
 
+
+// process table
+struct PCB pTable[MAXPROC];
+
+// current process running
+struct PCB *curProcess;
 
 /*
     Called exactly once (when the simulator starts up). Initialize data structures
     here including setting up the process table entry for the starting process, init.
 
-    Create the process table entry for init but don't run it yet.
+    Create the process table entry for init in slot 1 but don't run it yet.
 */
 void phase1_init(void) {
-    
+
+    // intitilizes table
+    memset(pTable, 0, sizeof(pTable));
+
+    curProcess = NULL;
+
+    // check for out of memory error
+    char *stack = (char *) malloc(USLOSS_MIN_STACK);
+
+    // init is a kernel mode process 
+    struct PCB initProcess;
+    strcpy(initProcess.name, "init"); 
+    initProcess.pid = 1;                     
+    initProcess.priority = 6; 
+    initProcess.parent = NULL;
+    initProcess.first_child = NULL;
+    initProcess.next_sibling = NULL;
+    initProcess.run_queue_next = NULL;
+
+    russ_ContextInit(initProcess.pid, &initProcess.state, stack, USLOSS_MIN_STACK, init_main, initProcess.name);
+
+    pTable[0] = initProcess;
+
+
+
+
 
 
 }
@@ -55,6 +97,18 @@ int  join(int *status) {
     return 0;
 }
 
+int  getpid(void) {
+    if (curProcess == NULL)
+        return -1;
+
+    return curProcess->pid;
+}
+
+
+void dumpProcesses() {
+
+}
+
 /*
     Since you don’t have a dispatcher, the calling process has to tell 
     you which process will run next.
@@ -62,17 +116,11 @@ int  join(int *status) {
     Never needs to wake up a blocked parent process.
 
 
-
-
-
 */
-void quit_phase_1a(int status, int switchToPid) __attribute__((__noreturn__)) {
-
+void quit_phase_1a(int status, int switchToPid) {
+    exit(status);
 }
 
-int  getpid(void) {
-
-}
 
 /*
     Testcases will choose exactly when to switch from one process to another.
