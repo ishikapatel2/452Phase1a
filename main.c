@@ -18,7 +18,6 @@ struct PCB {
 
 };
 
-
 struct PQ {
     struct PCB *process;
     struct PQ *run_queue_next;
@@ -33,12 +32,10 @@ struct PCB *curProcess;
 int processes = 0;
 
 // process table
-struct PCB *pTable[MAXPROC];
+struct PCB pTable[MAXPROC];
 
 // increments PID value every time new process is created
 int PID = 2;
-
-
 
 /*
     Called exactly once (when the simulator starts up). Initialize data structures
@@ -50,6 +47,7 @@ void phase1_init(void) {
 
     // intitilizes table
     memset(pTable, 0, sizeof(pTable));
+
     memset(queue, 0, sizeof(queue));
 
     curProcess = NULL;
@@ -65,40 +63,29 @@ void phase1_init(void) {
     initProcess.first_child = NULL;
     initProcess.next_sibling = NULL;
     initProcess.stack = (char *) malloc(USLOSS_MIN_STACK);
-    
 
     russ_ContextInit(initProcess.pid, &initProcess.state, initProcess.stack, USLOSS_MIN_STACK, init_main, initProcess.name);
 
-    pTable[1] = &initProcess;
+    pTable[1] = initProcess;
     processes += 1;
 
     struct PQ temp;
     temp.process = &initProcess;
     temp.run_queue_next = NULL;
     queue[6] = &temp; 
-
-    // called to run init process
-    //TEMP_switchTo(1);
-
-    USLOSS_Console("I made it here\n");
-    
-
 }
 
 int findProcess(int id) {
     int slot = id % MAXPROC;
 
-    struct PCB *p = pTable[slot];
+    struct PCB *p = &pTable[slot];
 
     while (p->pid != id) {
         slot += 1;
-        p = pTable[slot];
+        p = &pTable[slot];
     }
 
     return slot;
-
-
-
 
 }
 
@@ -114,15 +101,16 @@ int findProcess(int id) {
 void TEMP_switchTo(int pid) {
     int temp = findProcess(pid);
 
-
-
-    // save current process's state and running different pid
-    USLOSS_ContextSwitch(&curProcess->state, &pTable[temp]->state);
-
-    USLOSS_Console("I made it here\n");
-    
-    // update to this process
-    curProcess = pTable[pid];    
+    if (curProcess == NULL) {
+        curProcess = &pTable[temp];
+        USLOSS_ContextSwitch(NULL, &pTable[temp].state);
+    } else {
+        struct PCB *oldProc = curProcess;
+        curProcess = &pTable[temp];
+        // USLOSS_Console("%p, %p\n", &oldProc->state, &pTable[temp].state);
+        USLOSS_ContextSwitch(&oldProc->state, &pTable[temp].state);
+    }
+     
 }
 
 /*
@@ -142,48 +130,47 @@ int  spork(char *name, int(*func)(char *), char *arg, int stacksize, int priorit
         return -2;
     }
 
-    struct PCB newProcess;
-
-    // set new process properties
-    strcpy(newProcess.name, name);
-    newProcess.priority = priority;
-    newProcess.pid = PID; 
-    newProcess.status = 0;
-    newProcess.hasExited = 0;
-    newProcess.parent = curProcess;
-    newProcess.first_child = NULL;
-    newProcess.next_sibling = NULL;
-    // newProcess.run_queue_next = NULL;
-
-    // add child to current process's list of children
-
-    if (curProcess->first_child == NULL) {
-        curProcess->first_child = &newProcess;
-    } else {
-        struct PCB *temp = curProcess->first_child;
-        while (temp->next_sibling != NULL) {
-            temp = temp->next_sibling;
-        }
-        temp->next_sibling = &newProcess;
-    }
-
-    newProcess.stack = (char *) malloc(stacksize);
-    russ_ContextInit(newProcess.pid, &newProcess.state, newProcess.stack, USLOSS_MIN_STACK, init_main, newProcess.name);
-
     // add new process to process table
     // if slot is full, keep incrementing until empty slot is found
     int slot = PID % MAXPROC;
-    while (&pTable[slot] != NULL) {
+    while (pTable[slot].pid != 0) {
         slot += 1;
     }
 
-    pTable[slot] = &newProcess;
+    struct PCB *newProcess = &pTable[slot];
+
+    // set new process properties
+    strcpy(newProcess->name, name);
+    newProcess->priority = priority;
+    newProcess->pid = PID; 
+    newProcess->status = 0;
+    newProcess->hasExited = 0;
+    newProcess->parent = curProcess;
+    newProcess->first_child = NULL;
+    newProcess->next_sibling = NULL;
+
+    // add child to current process's list of children
+    if (curProcess->first_child == NULL) {
+        curProcess->first_child = newProcess;        
+    } else {
+        struct PCB *temp = curProcess->first_child;
+
+        while (temp->next_sibling != NULL) {
+            temp = temp->next_sibling;
+        }
+        temp->next_sibling = newProcess;
+    }
+
+    newProcess->stack = (char *) malloc(stacksize);
+    russ_ContextInit(newProcess->pid, &newProcess->state, newProcess->stack, USLOSS_MIN_STACK, func, arg);
+
+    // increment the number of processes currently in the table
     processes += 1;
 
     // increment PID
     PID += 1;
-
-    return newProcess.pid;
+    
+    return newProcess->pid;
 }
 
 /*
@@ -207,8 +194,11 @@ int  join(int *status) {
 
     struct PCB *child;
 
+ 
     for (child = curProcess->first_child; child != NULL; child = child->next_sibling) {
+        // USLOSS_Console("start here f%p\n", child);
         if (child->hasExited) {
+            // USLOSS_Console("%p\n", child);
             *status = child->status; // Set the exit status of the child
             child->hasExited = 0; // Reset the flag if necessary
             return child->pid; // Return the PID of the joined child
@@ -219,8 +209,6 @@ int  join(int *status) {
 }
 
 /*
-    Since you don’t have a dispatcher, the calling process has to tell 
-    you which process will run next.
 
     OS cannot end until all of their children have ended and the parent has collected
 all of their statuses (using join()).   
@@ -228,23 +216,28 @@ all of their statuses (using join()).
 */
 void quit_phase_1a(int status, int switchToPid) {
     int slot = findProcess(switchToPid);
-    struct PCB *temp = pTable[slot];
 
-    USLOSS_ContextSwitch(NULL, &temp->state);
+    curProcess->hasExited = 1;
+    curProcess->status = status;
+    
+    curProcess = &pTable[slot];
+    // USLOSS_Console("%p, %p\n", &oldProc->state, &pTable[temp].state);
+    
+    USLOSS_ContextSwitch(NULL, &curProcess->state);
 
     exit(status);
 }
 
 int  getpid(void) {
     if (curProcess == NULL)
-        return -1;
+        return 1;
 
     return curProcess->pid;
 }
 
 
 void dumpProcesses() {
-
+    
 }
 
 
