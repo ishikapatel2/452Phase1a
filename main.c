@@ -8,14 +8,14 @@ struct PCB {
     char name[MAXNAME+1];
     int pid; // process ID 
     int priority; // priority 
+    // int mode; // 0 kernel node, 1 user node
     USLOSS_Context state;
     void *stack;
-    int status; // 0 alive; 1 dead
+    int status;
     int hasExited; // if process has exited
     struct PCB *parent;
     struct PCB *first_child; // first child
     struct PCB *next_sibling; // all other children of the process
-
 };
 
 struct PQ {
@@ -44,6 +44,11 @@ int PID = 2;
     Create the process table entry for init in slot 1 but don't run it yet.
 */
 void phase1_init(void) {
+
+    if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
+        USLOSS_Console("ERROR: Someone attempted to call phase1_init while in user mode!\n");
+        USLOSS_Halt(1);
+    }
 
     // intitilizes table
     memset(pTable, 0, sizeof(pTable));
@@ -82,7 +87,7 @@ int findProcess(int id) {
 
     while (p->pid != id) {
         slot += 1;
-        p = &pTable[slot];
+        p = &pTable[slot%MAXPROC];
     }
 
     return slot;
@@ -99,6 +104,12 @@ int findProcess(int id) {
 
 */
 void TEMP_switchTo(int pid) {
+
+    if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
+        USLOSS_Console("ERROR: Someone attempted to call TEMP_switchTo while in user mode!\n");
+        USLOSS_Halt(1);
+    }
+
     int temp = findProcess(pid);
 
     if (curProcess == NULL) {
@@ -122,6 +133,12 @@ void TEMP_switchTo(int pid) {
 */
 int  spork(char *name, int(*func)(char *), char *arg, int stacksize, int priority) {
 
+    if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
+        USLOSS_Console("ERROR: Someone attempted to call spork while in user mode!\n");
+        USLOSS_Halt(1);
+    }
+
+
     if ((processes > MAXPROC) || (priority < 1) || (priority > 5) || 
     (name == NULL) || (strlen(name) > MAXNAME) || (func == NULL))  {
         return -1;
@@ -133,9 +150,12 @@ int  spork(char *name, int(*func)(char *), char *arg, int stacksize, int priorit
     // add new process to process table
     // if slot is full, keep incrementing until empty slot is found
     int slot = PID % MAXPROC;
-    while (pTable[slot].pid != 0) {
+    while (pTable[slot].pid != 0 && slot <  50) {
         slot += 1;
     }
+    
+    // if last slot in ptable is full, add to 0th position
+    slot = slot % MAXPROC;
 
     struct PCB *newProcess = &pTable[slot];
 
@@ -149,18 +169,9 @@ int  spork(char *name, int(*func)(char *), char *arg, int stacksize, int priorit
     newProcess->first_child = NULL;
     newProcess->next_sibling = NULL;
 
-    // add child to current process's list of children
-    if (curProcess->first_child == NULL) {
-        curProcess->first_child = newProcess;        
-    } else {
-        struct PCB *temp = curProcess->first_child;
-
-        while (temp->next_sibling != NULL) {
-            temp = temp->next_sibling;
-        }
-        temp->next_sibling = newProcess;
-    }
-
+    newProcess->next_sibling = curProcess->first_child;
+    curProcess->first_child = newProcess;
+    
     newProcess->stack = (char *) malloc(stacksize);
     russ_ContextInit(newProcess->pid, &newProcess->state, newProcess->stack, USLOSS_MIN_STACK, func, arg);
 
@@ -179,7 +190,6 @@ int  spork(char *name, int(*func)(char *), char *arg, int stacksize, int priorit
     Delivers the "status" of the child (the parameter that the child passed to quit())
     back to the parent. 
 
-
     No blocking. If the current process has a dead child, then join() should report 
     its status, exactly like in phase 1b. Likewise, if the current process has no 
     children at all (alive or dead), then join() should return, exactly like in phase 1b. 
@@ -188,34 +198,69 @@ int  spork(char *name, int(*func)(char *), char *arg, int stacksize, int priorit
    blocks, waiting for its child to die.
 */
 int  join(int *status) {
+    if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
+        USLOSS_Console("ERROR: Someone attempted to call join while in user mode!\n");
+        USLOSS_Halt(1);
+    }
+
     if (status == NULL) {
         return -3;
     } 
-
+    
     struct PCB *child;
-
+    struct PCB *prevChild = NULL;
  
     for (child = curProcess->first_child; child != NULL; child = child->next_sibling) {
+        
         // USLOSS_Console("start here f%p\n", child);
         if (child->hasExited) {
+
+            // fix pointers to child processes
+            if (prevChild == NULL) {
+                curProcess->first_child = child->next_sibling;
+            }
+            else {
+                prevChild->next_sibling = child->next_sibling;
+            }
+
+            // find slot where child is located on ptable
+            int slot = findProcess(child->pid);
+
             // USLOSS_Console("%p\n", child);
+
+            int temp = child->pid;
             *status = child->status; // Set the exit status of the child
-            child->hasExited = 0; // Reset the flag if necessary
-            return child->pid; // Return the PID of the joined child
+            free(child->stack); // free child's memory
+            memset(&pTable[slot], 0, sizeof(struct PCB));
+
+            
+            return temp; // Return the PID of the joined child
         }
+
+        prevChild = child;
     }
 
     return -2;
 }
 
 /*
-
     OS cannot end until all of their children have ended and the parent has collected
 all of their statuses (using join()).   
 
 */
 void quit_phase_1a(int status, int switchToPid) {
+
+    if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
+        USLOSS_Console("ERROR: Someone attempted to call quit_phase_1a while in user mode!\n");
+        USLOSS_Halt(1);
+    }
+
     int slot = findProcess(switchToPid);
+
+    if (curProcess->first_child != 0) {
+        USLOSS_Console("ERROR: Process pid %d called quit() while it still had children.\n", getpid());
+        USLOSS_Halt(1);
+    }
 
     curProcess->hasExited = 1;
     curProcess->status = status;
@@ -224,7 +269,6 @@ void quit_phase_1a(int status, int switchToPid) {
     // USLOSS_Console("%p, %p\n", &oldProc->state, &pTable[temp].state);
     
     USLOSS_ContextSwitch(NULL, &curProcess->state);
-
     exit(status);
 }
 
@@ -237,7 +281,39 @@ int  getpid(void) {
 
 
 void dumpProcesses() {
-    
+    if ((USLOSS_PsrGet() && USLOSS_PSR_CURRENT_MODE) == 0) {
+        USLOSS_Console("ERROR: Someone attempted to call dumpProcesses while in user mode!\n");
+        USLOSS_Halt(1);
+    }
+
+    int i = 0;
+    struct PCB *temp = &pTable[i];
+    USLOSS_Console("%-5s%-7s%-20s%-10s%-6s\n", "PID", "PPID", "NAME", "PRIORITY", "STATE");
+    while (i < MAXPROC) {
+        if (pTable[i].pid != 0) {
+            temp = &pTable[i];
+            int ppid;
+            if (temp->parent == NULL) {
+                ppid = 0;
+            }
+            else {
+                ppid = temp->parent->pid;
+            }
+            
+            USLOSS_Console("%4d  %4d  %-17s %-10d", i, ppid, temp->name, temp->priority, temp->status);
+            if (temp->status == 0 && temp->pid == curProcess->pid) {
+                USLOSS_Console("Running\n");
+            }
+            else if (temp->status == 0) {
+                USLOSS_Console("Runnable\n");
+            }
+            else if (temp->status == 3) {
+                USLOSS_Console("Terminated(%d)\n", temp->status);
+            }
+        }
+
+        i += 1;
+    }
 }
 
 
