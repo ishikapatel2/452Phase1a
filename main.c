@@ -18,6 +18,7 @@ struct PCB {
     struct PCB *next_sibling;  // pointer to next sibling
 };
 
+//backbone for subsequent priority queue
 struct PQ {
     struct PCB *process;
     struct PQ *run_queue_next;
@@ -39,8 +40,11 @@ struct PCB pTable[MAXPROC];
 int PID = 2;
 
 /*
-    Called exactly once and initializes process table, queue, and init process.
-*/
+ * Function: phase1_init
+ * ---------------------
+ * This function is called exactly once and initializes the process table, queue
+ * and init process. It has no parameters does not return.
+ */
 void phase1_init(void) {
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
         USLOSS_Console("ERROR: Someone attempted to call phase1_init while in user mode!\n");
@@ -71,8 +75,13 @@ void phase1_init(void) {
 }
 
 /*
-    Context switches from one process to another, saving old process's state.
-*/
+ * Function: TEMP_switchTo
+ * -----------------------
+ * This function performs context switches from one process to another, saving
+ * the old process's state.
+ * 
+ * @param int pid: process ID
+ */
 void TEMP_switchTo(int pid) {
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
         USLOSS_Console("ERROR: Someone attempted to call TEMP_switchTo while in user mode!\n");
@@ -93,20 +102,38 @@ void TEMP_switchTo(int pid) {
 }
 
 /*
-    Creates a new process, which is the child of the currently running process
-    and returns this child's pid if process table is not full. Returns -1 if the process
-    table is full, if priority given for new process is not between 1-5, if the func is null,
-    or if the name of the process exceeds MAXNAME. Returns -2 if the stack size of the
-    new process is less than USLOSS_MIN_STACK. 
-*/
-int  spork(char *name, int(*func)(char *), char *arg, int stacksize, int priority) {
+ * Function: spork
+ * ---------------
+ * This function creates a new process, which is the child of the currently running
+ * process and returns this child's PID if the process table is not full. 
+ * 
+ * @param char *name: name of process
+ * 
+ * @param int (*startFunc)(char*): main() function for child process
+ * 
+ * @param char *arg: argument to pass to startFunc() that may be NULL
+ * 
+ * @param int stackSize: size of stack in bytes that should not be less than
+ *                       USLOSS_MIN_STACK
+ * 
+ * @param int priority: priority of this process in range of 1-5 (inclusive)
+ * 
+ * @return int -2: returned if stackSize is less than USLOSS_MIN_STACK
+ * 
+ * @return int -1: returned if there are no empty slots in the process table,
+ *                 priority is out of range, startFunc is NULL, name is NULL,
+ *                 or name length is out of the accepted range
+ * 
+ * @return int >0: PID of child process
+ */
+int  spork(char *name, int(*startFunc)(char *), char *arg, int stacksize, int priority) {
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
         USLOSS_Console("ERROR: Someone attempted to call spork while in user mode!\n");
         USLOSS_Halt(1);
     }
 
     if ((processes >= MAXPROC) || (priority < 1) || (priority > 5) || 
-    (name == NULL) || (strlen(name) > MAXNAME) || (func == NULL))  {
+    (name == NULL) || (strlen(name) > MAXNAME) || (startFunc == NULL))  {
         return -1;
     }
     else if (stacksize < USLOSS_MIN_STACK) {
@@ -146,7 +173,7 @@ int  spork(char *name, int(*func)(char *), char *arg, int stacksize, int priorit
     curProcess->first_child = newProcess;
     newProcess->stack = (char *) malloc(stacksize);
 
-    russ_ContextInit(newProcess->pid, &newProcess->state, newProcess->stack, USLOSS_MIN_STACK, func, arg);
+    russ_ContextInit(newProcess->pid, &newProcess->state, newProcess->stack, USLOSS_MIN_STACK, startFunc, arg);
 
     // PID for new proces
     PID += 1;
@@ -155,11 +182,22 @@ int  spork(char *name, int(*func)(char *), char *arg, int stacksize, int priorit
 }
 
 /*
-    Delivers the "status" of the child (the parameter that the child passed to quit())
-    back to the parent. If the current process has a dead child, join() reports its
-    status. Returns the pid of the joined process if child has been terminated.
-    Returns -3 if there is no status. Returns -2 if child has not been terminated.
-*/
+ * Function: join
+ * --------------
+ * This function delivers the 'status' of the child (the parameter that the child passed
+ * to quit()) back to the parent. If the current process has a dead child, join() reports
+ * its status.
+ * 
+ * @param int *status: out-pointer that must point to an int; join fills this with
+ *                     the status of the process joined-to
+ * 
+ * @return int -3: returned if status pointer is NULL
+ * 
+ * @return int -2: returned if the process doesn't have any children or all children have
+ *                 already been joined
+ * 
+ * @return int >0: PID of child joined-to
+ */
 int  join(int *status) {
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
         USLOSS_Console("ERROR: Someone attempted to call join while in user mode!\n");
@@ -204,10 +242,17 @@ int  join(int *status) {
 }
 
 /*
-    Quits the running 3wwand switches to the next process. Ensure
-    process doesn't quit until all of its children have ended and parent
-    has collected all of their statuses (using join()).   
-*/
+ * Function: quit_phase_1a
+ * -----------------------
+ * This function quits the running process and switches to the next process. It
+ * ensures the process doesn't quit until all of its children have ended and parent
+ * has collected all of their statuses (using join()).
+ * 
+ * @param int status: out-pointer that must point to an int; join fills this with
+ *                    the status of the process joined-to
+ * 
+ * @param int switchToPid: PID of process to run next
+ */
 void quit_phase_1a(int status, int switchToPid) {
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
         USLOSS_Console("ERROR: Someone attempted to call quit_phase_1a while in user mode!\n");
@@ -235,8 +280,14 @@ void quit_phase_1a(int status, int switchToPid) {
 }
 
 /*
-    Returns the pid of current running process.    
-*/
+ * Function: getpid
+ * ----------------
+ * This function returns the PID of the current running process.
+ * 
+ * @return int 1: PID if curProcess is NULL
+ * 
+ * @return int curProcess: PID of curProcess
+ */
 int  getpid(void) {
     if (curProcess == NULL)
         return 1;
@@ -244,8 +295,10 @@ int  getpid(void) {
 }
 
 /*
-    Prints information about all processes in the process table. 
-*/
+ * Function: dumpProcesses
+ * -----------------------
+ * This function prints information about all processes in the process table. 
+ */
 void dumpProcesses() {
     if ((USLOSS_PsrGet() && USLOSS_PSR_CURRENT_MODE) == 0) {
         USLOSS_Console("ERROR: Someone attempted to call dumpProcesses while in user mode!\n");
