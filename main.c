@@ -75,41 +75,6 @@ void phase1_init(void) {
 }
 
 /*
-    Finds the slot the process with pid, id in the pTable
-*/
-// int findProcess(int id) {
-//     int slot = id % MAXPROC;
-//     struct PCB *p = &pTable[slot];
-
-//     while (p->pid != id && slot < 50) {
-//         slot += 1;
-//         p = &pTable[slot%MAXPROC];
-//     }
-
-//     return slot % MAXPROC;
-
-// }
-
-int findProcess(int id) {
-    int startSlot = id % MAXPROC;
-    int slot = startSlot;
-    struct PCB *p = &pTable[slot];
-
-    do {
-        if (p->pid == id) {
-            // Process with matching id found
-            return slot;
-        }
-        // Move to the next slot and wrap around if necessary
-        slot = (slot + 1) % MAXPROC;
-        p = &pTable[slot];
-    } while (slot != startSlot); // Ensure we don't loop indefinitely
-
-    return -1; // should never return -1 
-}
-
-
-/*
     Context switches from one process to another.
 */
 void TEMP_switchTo(int pid) {
@@ -118,7 +83,7 @@ void TEMP_switchTo(int pid) {
         USLOSS_Halt(1);
     }
 
-    int temp = findProcess(pid);
+    int temp = pid % MAXPROC;
 
     if (curProcess == NULL) {
         curProcess = &pTable[temp];
@@ -129,7 +94,6 @@ void TEMP_switchTo(int pid) {
         // USLOSS_Console("%p, %p\n", &oldProc->state, &pTable[temp].state);
         USLOSS_ContextSwitch(&oldProc->state, &pTable[temp].state);
     }
-     
 }
 
 /*
@@ -142,6 +106,9 @@ int  spork(char *name, int(*func)(char *), char *arg, int stacksize, int priorit
         USLOSS_Halt(1);
     }
 
+    // increment the number of processes currently in the table
+    processes += 1;
+
     if ((processes > MAXPROC) || (priority < 1) || (priority > 5) || 
     (name == NULL) || (strlen(name) > MAXNAME) || (func == NULL))  {
         return -1;
@@ -149,23 +116,28 @@ int  spork(char *name, int(*func)(char *), char *arg, int stacksize, int priorit
     else if (stacksize < USLOSS_MIN_STACK) {
         return -2;
     }
+    
+    int slot = PID % MAXPROC;
+   
 
-    // add new process to process table
-    // if slot is full, keep incrementing until empty slot is found
-
-    int slot = (PID % MAXPROC);
-    while (pTable[slot].pid != 0) {
-        slot = (slot + 1) % MAXPROC;
-
-        if (slot == PID % MAXPROC) {
-
-            // should never return -1
-            return -1;
+    if (pTable[slot].pid != 0) {
+        int original_slot = slot;
+        PID++;
+        slot = PID & MAXPROC;
+        while (pTable[slot].pid != 0 && slot != original_slot) {
+            PID++;
+            slot = PID % MAXPROC;
         }
     }
-    
+    // // keep incrememt PID if slot is not available
+    // while (pTable[slot].pid != 0 && slot ) {
+    //     PID++;
+    //     slot = PID % MAXPROC;
+    // }
+
     struct PCB *newProcess = &pTable[slot];
 
+    // USLOSS_Console("%d %d\n", PID, slot);
     // set new process properties
     strcpy(newProcess->name, name);
     newProcess->priority = priority;
@@ -182,10 +154,7 @@ int  spork(char *name, int(*func)(char *), char *arg, int stacksize, int priorit
     newProcess->stack = (char *) malloc(stacksize);
     russ_ContextInit(newProcess->pid, &newProcess->state, newProcess->stack, USLOSS_MIN_STACK, func, arg);
 
-    // increment the number of processes currently in the table
-    processes += 1;
-
-    // increment PID
+    // PID for new proces
     PID += 1;
     
     return newProcess->pid;
@@ -224,7 +193,7 @@ int  join(int *status) {
             }
 
             // find slot where child is located on ptable
-            int slot = findProcess(child->pid);
+            int slot = child->pid % MAXPROC;
 
             // USLOSS_Console("%p\n", child);
 
@@ -241,7 +210,7 @@ int  join(int *status) {
 }
 
 /*
-    Quits the running process and switches to the next process. Ensure
+    Quits the running 3wwand switches to the next process. Ensure
     process doesn't quit until all of its children have ended and parent
     has collected all of their statuses (using join()).   
 */
@@ -252,8 +221,6 @@ void quit_phase_1a(int status, int switchToPid) {
         USLOSS_Halt(1);
     }
 
-    int slot = findProcess(switchToPid);
-
     if (curProcess->first_child != 0) {
         USLOSS_Console("ERROR: Process pid %d called quit() while it still had children.\n", getpid());
         USLOSS_Halt(1);
@@ -261,9 +228,12 @@ void quit_phase_1a(int status, int switchToPid) {
 
     // set to exited and status (for join)
     curProcess->hasExited = 1;
-    curProcess->status = status;
-    
+    curProcess->status = status; 
+    // processes--;  
+
+    int slot = switchToPid % MAXPROC;
     curProcess = &pTable[slot];
+    
     // USLOSS_Console("%p, %p\n", &oldProc->state, &pTable[temp].state);
     
     USLOSS_ContextSwitch(NULL, &curProcess->state);
