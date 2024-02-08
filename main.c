@@ -5,16 +5,17 @@
 #include <stdlib.h>
 
 struct PCB {
-    char name[MAXNAME+1];
+    char name[MAXNAME+1]; // name of process
     int pid; // process ID 
     int priority; // priority 
     USLOSS_Context state;
-    void *stack;
-    int status; // running, ready, or blocked
-    int hasExited; // tracks if process has terminated
-    struct PCB *parent;
-    struct PCB *first_child; 
-    struct PCB *next_sibling;
+    void *stack; // pointer to process stack
+    int status; // process status: running, ready, or blocked
+    int hasExited; // flag to check if process has terminated
+    int used; // flag to check if process in use
+    struct PCB *parent; 
+    struct PCB *first_child; // pointer to its children
+    struct PCB *next_sibling;  // pointer to next sibling
 };
 
 struct PQ {
@@ -22,13 +23,14 @@ struct PQ {
     struct PQ *run_queue_next;
 };
 
+// priority queue
 struct PQ *queue[7];
 
 // current process running
 struct PCB *curProcess;
 
 // number of processes in process table
-int processes = 0;
+int processes = 1;
 
 // process table
 struct PCB pTable[MAXPROC];
@@ -51,31 +53,25 @@ void phase1_init(void) {
 
     curProcess = NULL;
 
-    struct PCB initProcess;
+    struct PCB *initProcess = &pTable[1];
     
-    strcpy(initProcess.name, "init"); 
-    initProcess.pid = 1;                     
-    initProcess.priority = 6; 
-    initProcess.status = 0;
-    initProcess.hasExited = 0;
-    initProcess.parent = NULL;
-    initProcess.first_child = NULL;
-    initProcess.next_sibling = NULL;
-    initProcess.stack = (char *) malloc(USLOSS_MIN_STACK);
+    // intializing init process's properties 
+    strcpy(initProcess->name, "init"); 
+    initProcess->pid = 1;                     
+    initProcess->priority = 6; 
+    initProcess->status = 0;
+    initProcess->hasExited = 0;
+    initProcess->parent = NULL;
+    initProcess->first_child = NULL;
+    initProcess->next_sibling = NULL;
+    initProcess->used = 1;
+    initProcess->stack = (char *) malloc(USLOSS_MIN_STACK);
 
-    russ_ContextInit(initProcess.pid, &initProcess.state, initProcess.stack, USLOSS_MIN_STACK, init_main, initProcess.name);
-
-    pTable[1] = initProcess;
-    processes += 1;
-
-    struct PQ temp;
-    temp.process = &initProcess;
-    temp.run_queue_next = NULL;
-    queue[6] = &temp; 
+    russ_ContextInit(initProcess->pid, &initProcess->state, initProcess->stack, USLOSS_MIN_STACK, init_main, initProcess->name);
 }
 
 /*
-    Context switches from one process to another.
+    Context switches from one process to another, saving old process's state.
 */
 void TEMP_switchTo(int pid) {
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
@@ -83,22 +79,25 @@ void TEMP_switchTo(int pid) {
         USLOSS_Halt(1);
     }
 
-    int temp = pid % MAXPROC;
+    // finds the slot where the new prcoess being context switched to is 
+    int slot = pid % MAXPROC;
 
     if (curProcess == NULL) {
-        curProcess = &pTable[temp];
-        USLOSS_ContextSwitch(NULL, &pTable[temp].state);
+        curProcess = &pTable[slot];
+        USLOSS_ContextSwitch(NULL, &pTable[slot].state);
     } else {
         struct PCB *oldProc = curProcess;
-        curProcess = &pTable[temp];
-        // USLOSS_Console("%p, %p\n", &oldProc->state, &pTable[temp].state);
-        USLOSS_ContextSwitch(&oldProc->state, &pTable[temp].state);
+        curProcess = &pTable[slot];
+        USLOSS_ContextSwitch(&oldProc->state, &pTable[slot].state);
     }
 }
 
 /*
     Creates a new process, which is the child of the currently running process
-    and returns this child's pid if process table is not full. 
+    and returns this child's pid if process table is not full. Returns -1 if the process
+    table is full, if priority given for new process is not between 1-5, if the func is null,
+    or if the name of the process exceeds MAXNAME. Returns -2 if the stack size of the
+    new process is less than USLOSS_MIN_STACK. 
 */
 int  spork(char *name, int(*func)(char *), char *arg, int stacksize, int priority) {
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
@@ -106,10 +105,7 @@ int  spork(char *name, int(*func)(char *), char *arg, int stacksize, int priorit
         USLOSS_Halt(1);
     }
 
-    // increment the number of processes currently in the table
-    processes += 1;
-
-    if ((processes > MAXPROC) || (priority < 1) || (priority > 5) || 
+    if ((processes >= MAXPROC) || (priority < 1) || (priority > 5) || 
     (name == NULL) || (strlen(name) > MAXNAME) || (func == NULL))  {
         return -1;
     }
@@ -117,46 +113,44 @@ int  spork(char *name, int(*func)(char *), char *arg, int stacksize, int priorit
         return -2;
     }
     
+    // finds the next open slot in the process table to put new process
     int slot = PID % MAXPROC;
-   
-
-    if (pTable[slot].pid != 0) {
-        int original_slot = slot;
+    int count = 1;
+    while (count <= MAXPROC && pTable[slot].used == 1) {
         PID++;
-        slot = PID & MAXPROC;
-        while (pTable[slot].pid != 0 && slot != original_slot) {
-            PID++;
-            slot = PID % MAXPROC;
+        slot = PID % MAXPROC;
+        count += 1;
+
+        // checks if process table is full
+        if (count == MAXPROC) {
+            return -1;
         }
     }
-    // // keep incrememt PID if slot is not available
-    // while (pTable[slot].pid != 0 && slot ) {
-    //     PID++;
-    //     slot = PID % MAXPROC;
-    // }
 
-    struct PCB *newProcess = &pTable[slot];
+    struct PCB *newProcess = &pTable[slot];  
 
-    // USLOSS_Console("%d %d\n", PID, slot);
+    // increment number of process in process table 
+    processes += 1;
+
     // set new process properties
     strcpy(newProcess->name, name);
     newProcess->priority = priority;
     newProcess->pid = PID; 
     newProcess->status = 0;
     newProcess->hasExited = 0;
+    newProcess->used = 1;
     newProcess->parent = curProcess;
     newProcess->first_child = NULL;
     newProcess->next_sibling = NULL;
-
     newProcess->next_sibling = curProcess->first_child;
     curProcess->first_child = newProcess;
-    
     newProcess->stack = (char *) malloc(stacksize);
+
     russ_ContextInit(newProcess->pid, &newProcess->state, newProcess->stack, USLOSS_MIN_STACK, func, arg);
 
     // PID for new proces
     PID += 1;
-    
+
     return newProcess->pid;
 }
 
@@ -178,13 +172,14 @@ int  join(int *status) {
     
     struct PCB *child;
     struct PCB *prevChild = NULL;
- 
+
+
+    // iterates through all of current process's children to determine if they have all
+    // been terminated 
     for (child = curProcess->first_child; child != NULL; child = child->next_sibling) {
-        
-        // USLOSS_Console("start here f%p\n", child);
         if (child->hasExited) {
 
-            // fix pointers to child processes
+            // fix pointers to child processes 
             if (prevChild == NULL) {
                 curProcess->first_child = child->next_sibling;
             }
@@ -192,17 +187,16 @@ int  join(int *status) {
                 prevChild->next_sibling = child->next_sibling;
             }
 
-            // find slot where child is located on ptable
+            // find slot where child is located in process table
             int slot = child->pid % MAXPROC;
-
-            // USLOSS_Console("%p\n", child);
-
+            processes--;
             int temp = child->pid;
-            *status = child->status; // Set the exit status of the child
+            *status = child->status; // set the exit status of the child
             free(child->stack); // free child's memory
-            memset(&pTable[slot], 0, sizeof(struct PCB));
+            memset(&pTable[slot], 0, sizeof(struct PCB)); // reset memory at the slot
+            pTable[slot].used = 0;
             
-            return temp; // Return the PID of the joined child
+            return temp; // return the PID of the joined child
         }
         prevChild = child;
     }
@@ -215,7 +209,6 @@ int  join(int *status) {
     has collected all of their statuses (using join()).   
 */
 void quit_phase_1a(int status, int switchToPid) {
-
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
         USLOSS_Console("ERROR: Someone attempted to call quit_phase_1a while in user mode!\n");
         USLOSS_Halt(1);
@@ -227,16 +220,17 @@ void quit_phase_1a(int status, int switchToPid) {
     }
 
     // set to exited and status (for join)
-    curProcess->hasExited = 1;
-    curProcess->status = status; 
-    // processes--;  
+    if (curProcess->pid != 1) {
+        curProcess->hasExited = 1;
+        curProcess->used = 0;
+        curProcess->status = status;   
+    
+        int slot = switchToPid % MAXPROC;
+        curProcess = &pTable[slot];
+        
+        USLOSS_ContextSwitch(NULL, &curProcess->state);
+    }
 
-    int slot = switchToPid % MAXPROC;
-    curProcess = &pTable[slot];
-    
-    // USLOSS_Console("%p, %p\n", &oldProc->state, &pTable[temp].state);
-    
-    USLOSS_ContextSwitch(NULL, &curProcess->state);
     exit(status);
 }
 
@@ -250,7 +244,7 @@ int  getpid(void) {
 }
 
 /*
-    Prints inforation about all processes from the process table in any state. 
+    Prints information about all processes in the process table. 
 */
 void dumpProcesses() {
     if ((USLOSS_PsrGet() && USLOSS_PSR_CURRENT_MODE) == 0) {
@@ -262,6 +256,8 @@ void dumpProcesses() {
     struct PCB *temp = &pTable[i];
     USLOSS_Console("%4s  %4s  %-17s %-10s%-6s\n", "PID", "PPID", "NAME", "PRIORITY", "STATE");
     while (i < MAXPROC) {
+
+        // print all processes that have not been joined and are still in process table
         if (pTable[i].pid != 0) {
             temp = &pTable[i];
             int ppid;
@@ -269,10 +265,14 @@ void dumpProcesses() {
                 ppid = 0;
             }
             else {
+
+                // gets parent's pid
                 ppid = temp->parent->pid;
             }
             
             USLOSS_Console("%4d  %4d  %-17s %-10d", temp->pid, ppid, temp->name, temp->priority);
+
+            // prints process status
             if (temp->status == 0 && temp->pid == curProcess->pid) {
                 USLOSS_Console("Running\n");
             }
